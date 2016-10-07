@@ -1,0 +1,148 @@
+#!/bin/bash -e
+
+SOURCE="$(realpath $(dirname ${BASH_SOURCE[0]}))"
+
+WORK="/mnt/storage/tmp/colonus-sd-image"
+MOUNT="/mnt/storage/tmp/colonus-sd-image-mount"
+TMPPKG="$MOUNT/tmp/package"
+IMAGEDL="ubuntu-16.04-preinstalled-server-armhf+raspi2.img"
+DT=$(date +%s)
+STAMP=$(echo $(date -d @${DT} +%F_%T) | awk -F ':' '{print $1""$2}')
+
+OUTDIR=$1
+
+# TODO: do better checking of both required args
+if ! [ -e "$OUTDIR" ]; then
+  2&> "Cannot write to $1; expecting arg specifying outdir"
+  exit 2
+fi
+
+OUTIMG=$1/horizon-rpi2-$STAMP.img
+TMPOUTIMG=$WORK/horizon-rpi2.img
+
+mkdir "$WORK" > /dev/null 2>&1
+
+cd "$WORK"
+if ! [ -e "$IMAGEDL" ]; then
+  wget http://cdimage.ubuntu.com/ubuntu/releases/16.04/release/$IMAGEDL.xz; xz -d $IMAGEDL.xz
+fi
+
+rm -f $TMPOUTIMG; cp $IMAGEDL $TMPOUTIMG
+
+loopdev() {
+  losetup -l | grep "$TMPOUTIMG" | awk '{print $1}'
+}
+
+looppart() {
+  echo "$(echo "$1" | grep -oP '\/dev\/\K\w+')${2}"
+}
+
+usedbytes() {
+  df -B1 $1 | awk 'NR>1{print $3}'
+}
+
+# purposefully leaves around intermediate build files
+cleanup() {
+  if [[ ! -z "$DEBUG" ]]; then
+    sleep 3600
+  fi
+
+  USED_ROOT=$(usedbytes "$MOUNT")
+  echo "used root: $USED_ROOT"
+
+  umount "$MOUNT/boot"
+  umount "$MOUNT/dev/pts"
+  umount "$MOUNT/dev"
+  umount "$MOUNT/sys" "$MOUNT/proc"
+  umount "$MOUNT"
+  echo "Consistency check partitions"
+  e2fsck -fy /dev/mapper/"$LOOP_ROOT_PARTITION" || :
+
+  # root padding
+  PAD=$((16*1024*1024))
+
+  #TODO: use calculated root size instead of canned one (was too small for destination files for some reason)
+  SMALLER_ROOT=$((1450*1024*1024))
+
+  rm -f $WORK/root_smaller
+  fsarchiver -j 2 -z 1 savefs $WORK/root_smaller /dev/mapper/"$LOOP_ROOT_PARTITION"
+
+  # can't use this; resize2fs is unable to resize to smaller than approx. 2x the used space
+  #resize2fs -f "/dev/mapper/$LOOP_ROOT_PARTITION" $((SMALLER_ROOT/1024))K
+
+  parted -s $LOOP_DEV rm 2
+  parted -s $LOOP_DEV mkpart primary $(($(parted -s $LOOP_DEV unit s print | grep -Po '1\s+\d+s\s+\K(\d+)')+1))s ${SMALLER_ROOT}B
+  kpartx -u "$LOOP_DEV"
+
+  parted -s $LOOP_DEV unit b print
+
+  END_ROOT_B=$(parted -s $LOOP_DEV unit b print | grep -Po '2\s+\d+B\s+\K(\d+)')
+
+  fsarchiver restfs $WORK/root_smaller.fsa id=0,dest=/dev/mapper/"$LOOP_ROOT_PARTITION"
+
+  echo "Removing $LOOP_DEV..."
+  losetup -d "$LOOP_DEV"
+  kpartx -d "$LOOP_DEV" 2> /dev/null
+  while [ "$?" != 0 ]; do
+    kpartx -d "$LOOP_DEV" 2> /dev/null
+  done
+
+  SIZE=$((END_ROOT_B + PAD))
+  NEW_END=$(($SIZE + (1024 - $SIZE % 1024)))
+  dd if=/dev/null of=$TMPOUTIMG bs=1 count=0 seek=$NEW_END
+
+  echo "Finished building image, moving to provided output dir"
+  rm $WORK/root_smaller*
+  mv $TMPOUTIMG $OUTIMG
+}
+
+trap cleanup INT TERM EXIT
+
+LOOP_DEV="$( loopdev )"
+TRIES=0
+until [ "$LOOP_DEV" != "" ]; do
+  echo "Adding partition mappings for image"
+  kpartx -af "$TMPOUTIMG"
+  LOOP_DEV="$( loopdev )"
+  sleep 2
+
+  TRIES=$(($TRIES+1))
+  if [ "$TRIES" -gt 4 ]; then
+    exit 2
+  fi
+done
+
+LOOP_BOOT_PARTITION="$( looppart $LOOP_DEV p1 )"
+LOOP_ROOT_PARTITION="$( looppart $LOOP_DEV p2 )"
+
+EX=$(mount | grep -q "$MOUNT" || :)
+if [ "$EX" == "" ]; then
+  mkdir "$MOUNT" > /dev/null 2>&1
+  echo "mounting /dev/mapper/$LOOP_ROOT_PARTITION"
+  mount -o loop /dev/mapper/"$LOOP_ROOT_PARTITION" "$MOUNT"
+  mount -o loop /dev/mapper/"$LOOP_BOOT_PARTITION" "$MOUNT"/boot
+fi
+
+echo "mounts: $(mount | grep "$MOUNT")"
+
+# copy canned seed files from project source (they are distributed inside the chroot env, this just gets them into that FS)
+mkdir -p "$MOUNT/seed/"
+cp -vfda --no-preserve=ownership "$SOURCE"/seed/* "$MOUNT"/seed/
+chown -R root:root $MOUNT/seed/fs
+cp -vfda "$MOUNT"/seed/fs/. $MOUNT/
+
+# write stamp into fs
+echo $DT > $MOUNT/etc/horizon_release
+
+mount -t proc none "$MOUNT"/proc
+mount -o bind /dev "$MOUNT"/dev
+mkdir -p "$MOUNT"/dev/pts
+mount devpts "$MOUNT"/dev/pts -t devpts
+mount -o bind /sys "$MOUNT"/sys
+cp --remove-destination /etc/resolv.conf "$MOUNT"/etc/
+
+chroot "$MOUNT" /bin/bash -l -c /seed/setup
+
+rm -Rf $TMPPKG
+rm "$MOUNT"/etc/resolv.conf
+rm -f "$MOUNT"/etc/ssh/ssh_host_*key*

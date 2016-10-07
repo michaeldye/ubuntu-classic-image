@@ -1,0 +1,11 @@
+[Match]
+Name=e*
+
+[Link]
+Name=eth0
+
+[Network]
+DHCP=v4
+
+[DHCP]
+RouteMetric=40

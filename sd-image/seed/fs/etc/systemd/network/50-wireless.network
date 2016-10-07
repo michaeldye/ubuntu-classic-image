@@ -1,0 +1,11 @@
+[Match]
+Name=wl*
+
+[Link]
+Name=wlan0
+
+[Network]
+DHCP=v4
+
+[DHCP]
+RouteMetric=50
