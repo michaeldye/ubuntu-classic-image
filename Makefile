@@ -6,8 +6,10 @@ IMAGE_OUTPUT_DIR ?= /mnt/extra
 
 all: sd-image
 
-clean:
-	-rm -rf $(IMAGE_OUTPUT_DIR)/horizon-rpi2-*
+clean: clean-pi2 clean-pi3
+
+clean-%:
+	-rm -rf $(IMAGE_OUTPUT_DIR)/horizon-$*-*
 
 deep-clean:
 	tools/deep-clean CLEAN
@@ -15,12 +17,12 @@ deep-clean:
 repo-fork-sync:
 	tools/repo-fork-sync
 
-sd-image:
-	bash -x sd-image/package-sd-image $(IMAGE_OUTPUT_DIR)
+%-sd-image:
+	bash -x sd-image/package-sd-image $* $(IMAGE_OUTPUT_DIR)
 
-push-sd-image:
+push-%-sd-image:
 	cd $(IMAGE_OUTPUT_DIR); \
-		export IMG=$$(ls ./horizon-rpi2-*.img); \
+		export IMG=$$(ls ./horizon-$*-*.img); \
 		zip -8 $$IMG.zip $$IMG; \
 		swift upload --verbose colonus $$IMG.zip
 

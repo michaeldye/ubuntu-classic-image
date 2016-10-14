@@ -1,0 +1,11 @@
+[Unit]
+Description=ip out console
+Requirer=network-online.target getty.target
+After=network-online.target getty.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ip-out-console
+RemainAfterExit=yes
+StandardOutput=tty
+StandardError=tty

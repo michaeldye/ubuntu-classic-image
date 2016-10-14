@@ -2,9 +2,10 @@
 
 loud() {
   local msg="++ Horizon firstboot: $1"
-  echo -e $msg > /dev/console
-  echo -e $msg > /dev/tty1
-  logger -t horizon-configure $(echo -e $msg)
+  echo -e "$msg" > /dev/console
+  echo -e "$msg" > /dev/ttyS0
+  echo -e "$msg" > /dev/tty1
+  echo -e "$msg" | logger -t horizon-configure
 }
 
 exists() {
@@ -19,7 +20,8 @@ reachable() {
 
 # run these always
 # TODO: figure out why the "quiet" mode affects behavior and not just logging
-sh -c 'echo -n "normal" > /sys/module/apparmor/parameters/audit'
+echo -n "normal" > /sys/module/apparmor/parameters/audit
+for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do echo "ondemand" > $i; done
 
 if  [ -e /var/horizon/.firstboot ]; then
   if [ "$(exists bluehorizon)" != 0 ]; then
@@ -45,7 +47,7 @@ if  [ -e /var/horizon/.firstboot ]; then
     else
       until [ $(exists bluehorizon) == 0 ]; do
         mkdir -p /var/log/horizon
-        snap install --devmode --edge bluehorizon 2>/var/log/horizon/firstboot_snap_install-error.log
+        snap install --devmode --beta bluehorizon 2>/var/log/horizon/firstboot_snap_install-error.log
 
         start=$(date +%s)
         if [ $((start - $(date +%s))) -gt 120 ]; then

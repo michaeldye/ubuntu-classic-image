@@ -4,30 +4,47 @@ SOURCE="$(realpath $(dirname ${BASH_SOURCE[0]}))"
 
 WORK="/mnt/storage/tmp/colonus-sd-image"
 MOUNT="/mnt/storage/tmp/colonus-sd-image-mount"
+MOUNT_BOOT="/mnt/storage/tmp/colonus-sd-image-mount-boot"
 TMPPKG="$MOUNT/tmp/package"
-IMAGEDL="ubuntu-16.04-preinstalled-server-armhf+raspi2.img"
 DT=$(date +%s)
 STAMP=$(echo $(date -d @${DT} +%F_%T) | awk -F ':' '{print $1""$2}')
 
-OUTDIR=$1
+MODEL=$1
 
-# TODO: do better checking of both required args
+case $MODEL in
+  pi2)
+    IMAGE="ubuntu-16.04-preinstalled-server-armhf+raspi2.img"
+    URL="http://cdimage.ubuntu.com/ubuntu/releases/16.04/release/$IMAGE.xz"
+    ;;
+  pi3)
+    IMAGE="ubuntu-16.04-preinstalled-server-armhf+raspi3.img"
+    URL="http://www.finnie.org/software/raspberrypi/ubuntu-rpi3/$IMAGE.xz"
+    ;;
+esac
+
+if [ "$IMAGE" == "" ]; then
+  2&>1 "Cannot find suitable image. Ensure you have provided an arg specifying the image model"
+  exit 1
+fi
+
+OUTDIR=$2
+
 if ! [ -e "$OUTDIR" ]; then
   2&> "Cannot write to $1; expecting arg specifying outdir"
   exit 2
 fi
 
-OUTIMG=$1/horizon-rpi2-$STAMP.img
-TMPOUTIMG=$WORK/horizon-rpi2.img
+OUTIMG=$OUTDIR/horizon-$MODEL-$STAMP.img
+TMPOUTIMG=$WORK/horizon-$MODEL.img
 
 mkdir "$WORK" > /dev/null 2>&1
 
 cd "$WORK"
-if ! [ -e "$IMAGEDL" ]; then
-  wget http://cdimage.ubuntu.com/ubuntu/releases/16.04/release/$IMAGEDL.xz; xz -d $IMAGEDL.xz
+if ! [ -e "$IMAGE" ]; then
+  wget $URL; xz -d $IMAGE.xz
 fi
 
-rm -f $TMPOUTIMG; cp $IMAGEDL $TMPOUTIMG
+rm -f $TMPOUTIMG; cp $IMAGE $TMPOUTIMG
 
 loopdev() {
   losetup -l | grep "$TMPOUTIMG" | awk '{print $1}'
@@ -41,16 +58,14 @@ usedbytes() {
   df -B1 $1 | awk 'NR>1{print $3}'
 }
 
+CHROOT_ERR=0
+
 # purposefully leaves around intermediate build files
 cleanup() {
-  if [[ ! -z "$DEBUG" ]]; then
-    sleep 3600
-  fi
-
   USED_ROOT=$(usedbytes "$MOUNT")
   echo "used root: $USED_ROOT"
 
-  umount "$MOUNT/boot"
+  umount "$MOUNT_BOOT"
   umount "$MOUNT/dev/pts"
   umount "$MOUNT/dev"
   umount "$MOUNT/sys" "$MOUNT/proc"
@@ -58,27 +73,28 @@ cleanup() {
   echo "Consistency check partitions"
   e2fsck -fy /dev/mapper/"$LOOP_ROOT_PARTITION" || :
 
-  # root padding
-  PAD=$((16*1024*1024))
+  # used for both fs and partition padding
+  PAD=$((8*1024*1024))
+  sync
 
-  #TODO: use calculated root size instead of canned one (was too small for destination files for some reason)
-  SMALLER_ROOT=$((1450*1024*1024))
+  # TODO: figure out what takes up space besides the USED_ROOT such that USED_ROOT+PAD is not sufficient for the new, smaller root size
+  SMALLER_ROOT=$((USED_ROOT+PAD+(256*1024*1024)))
 
-  rm -f $WORK/root_smaller
-  fsarchiver -j 2 -z 1 savefs $WORK/root_smaller /dev/mapper/"$LOOP_ROOT_PARTITION"
+  if [ "$CHROOT_ERR" == 0 ]; then
+    rm -f $WORK/root_smaller*
 
-  # can't use this; resize2fs is unable to resize to smaller than approx. 2x the used space
-  #resize2fs -f "/dev/mapper/$LOOP_ROOT_PARTITION" $((SMALLER_ROOT/1024))K
+    fsarchiver -j 2 -z 1 savefs $WORK/root_smaller /dev/mapper/"$LOOP_ROOT_PARTITION"
 
-  parted -s $LOOP_DEV rm 2
-  parted -s $LOOP_DEV mkpart primary $(($(parted -s $LOOP_DEV unit s print | grep -Po '1\s+\d+s\s+\K(\d+)')+1))s ${SMALLER_ROOT}B
-  kpartx -u "$LOOP_DEV"
+    parted -s $LOOP_DEV rm 2
+    parted -s $LOOP_DEV mkpart primary $(($(parted -s $LOOP_DEV unit s print | grep -Po '1\s+\d+s\s+\K(\d+)')+1))s ${SMALLER_ROOT}B
+    kpartx -u "$LOOP_DEV"
 
-  parted -s $LOOP_DEV unit b print
+    parted -s $LOOP_DEV unit b print
 
-  END_ROOT_B=$(parted -s $LOOP_DEV unit b print | grep -Po '2\s+\d+B\s+\K(\d+)')
+    END_ROOT_B=$(parted -s $LOOP_DEV unit b print | grep -Po '2\s+\d+B\s+\K(\d+)')
 
-  fsarchiver restfs $WORK/root_smaller.fsa id=0,dest=/dev/mapper/"$LOOP_ROOT_PARTITION"
+    fsarchiver restfs "$WORK"/root_smaller.fsa id=0,dest=/dev/mapper/"$LOOP_ROOT_PARTITION"
+  fi
 
   echo "Removing $LOOP_DEV..."
   losetup -d "$LOOP_DEV"
@@ -87,13 +103,18 @@ cleanup() {
     kpartx -d "$LOOP_DEV" 2> /dev/null
   done
 
-  SIZE=$((END_ROOT_B + PAD))
-  NEW_END=$(($SIZE + (1024 - $SIZE % 1024)))
-  dd if=/dev/null of=$TMPOUTIMG bs=1 count=0 seek=$NEW_END
+  if [ "$CHROOT_ERR" == 0 ]; then
+    SIZE=$((END_ROOT_B + PAD))
+    NEW_END=$(($SIZE + (1024 - $SIZE % 1024)))
+    dd if=/dev/null of=$TMPOUTIMG bs=1 count=0 seek=$NEW_END
 
-  echo "Finished building image, moving to provided output dir"
-  rm $WORK/root_smaller*
-  mv $TMPOUTIMG $OUTIMG
+    echo "Finished building image, moving to provided output dir"
+    mv $TMPOUTIMG $OUTIMG
+  fi
+
+  rm -f $WORK/root_smaller*
+
+  exit $CHROOT_ERR
 }
 
 trap cleanup INT TERM EXIT
@@ -120,19 +141,22 @@ if [ "$EX" == "" ]; then
   mkdir "$MOUNT" > /dev/null 2>&1
   echo "mounting /dev/mapper/$LOOP_ROOT_PARTITION"
   mount -o loop /dev/mapper/"$LOOP_ROOT_PARTITION" "$MOUNT"
-  mount -o loop /dev/mapper/"$LOOP_BOOT_PARTITION" "$MOUNT"/boot
+
+  # a trick: copying $LOOP_BOOT_PARTITION content into $LOOP_ROOT_PARTITION/boot so that chrooted kernel upgrades will succeed on ext4 fs. Need to copy those back out to $LOOP_BOOT_PARTITION later and wipe $LOOP_ROOT_PARTITION/boot
+  mount -o loop /dev/mapper/"$LOOP_BOOT_PARTITION" "$MOUNT_BOOT"
+  cp -vrLp "$MOUNT_BOOT"/. "$MOUNT"/boot/
+else
+  2>&1 "$MOUNT not mounted, cannot continue"
+  exit 1
 fi
 
 echo "mounts: $(mount | grep "$MOUNT")"
 
 # copy canned seed files from project source (they are distributed inside the chroot env, this just gets them into that FS)
-mkdir -p "$MOUNT/seed/"
+mkdir -p "$MOUNT"/seed/
 cp -vfda --no-preserve=ownership "$SOURCE"/seed/* "$MOUNT"/seed/
-chown -R root:root $MOUNT/seed/fs
-cp -vfda "$MOUNT"/seed/fs/. $MOUNT/
-
-# write stamp into fs
-echo $DT > $MOUNT/etc/horizon_release
+chown -R root:root "$MOUNT"/seed/fs
+cp -vfda "$MOUNT"/seed/fs/. "$MOUNT"/
 
 mount -t proc none "$MOUNT"/proc
 mount -o bind /dev "$MOUNT"/dev
@@ -141,8 +165,17 @@ mount devpts "$MOUNT"/dev/pts -t devpts
 mount -o bind /sys "$MOUNT"/sys
 cp --remove-destination /etc/resolv.conf "$MOUNT"/etc/
 
-chroot "$MOUNT" /bin/bash -l -c /seed/setup
+chroot "$MOUNT" /bin/bash -c "/seed/setup $MODEL"
+CHROOT_ERR=$?
 
 rm -Rf $TMPPKG
 rm "$MOUNT"/etc/resolv.conf
 rm -f "$MOUNT"/etc/ssh/ssh_host_*key*
+
+mkdir -p "$MOUNT"/var/horizon/
+echo "$STAMP" > "$MOUNT"/var/horizon/image_version
+
+# copy boot files back to boot partition; hose boot files on root fs
+rm -Rf "$MOUNT_BOOT"/*
+cp -vrLp "$MOUNT"/boot/. "$MOUNT_BOOT"/
+rm -Rf "$MOUNT"/boot/*

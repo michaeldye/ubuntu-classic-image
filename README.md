@@ -16,7 +16,7 @@ Related Projects:
 #### Preconditions
 
 * Execution on an armhf device (often we build on Odroid xu4 or C2 SBCs)
-* You must have the module `dm_multipath` loaded and `kpartx`, `parted`, `zip`, `unzip`, and other common GNU tools installed
+* You must have the module `dm_multipath` loaded and `kpartx`, `parted`, `zip`, `unzip`, `fsarchiver`, and other common GNU tools installed
 
 #### Steps
 
