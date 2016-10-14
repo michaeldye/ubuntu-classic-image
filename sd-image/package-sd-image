@@ -2,10 +2,6 @@
 
 SOURCE="$(realpath $(dirname ${BASH_SOURCE[0]}))"
 
-WORK="/mnt/storage/tmp/colonus-sd-image"
-MOUNT="/mnt/storage/tmp/colonus-sd-image-mount"
-MOUNT_BOOT="/mnt/storage/tmp/colonus-sd-image-mount-boot"
-TMPPKG="$MOUNT/tmp/package"
 DT=$(date +%s)
 STAMP=$(echo $(date -d @${DT} +%F_%T) | awk -F ':' '{print $1""$2}')
 
@@ -27,17 +23,32 @@ if [ "$IMAGE" == "" ]; then
   exit 1
 fi
 
-OUTDIR=$2
+WORK_DIR=$2
+
+if ! [ -d "$WORK_DIR" ]; then
+  2>&1 "Unspecified or unusable work directory ($WORK_DIR), bailing"
+  exit 1
+fi
+
+WORK="$WORK_DIR"/sd-image
+MOUNT="$WORK_DIR"/sd-image-mount
+MOUNT_BOOT="$WORK_DIR"/sd-image-mount-boot
+TMPPKG="$MOUNT"/tmp/package
+
+# these should cover creating all dirs above
+mkdir -p "$WORK"
+mkdir -p "$TMPPKG"
+mkdir -p "$MOUNT_BOOT"
+
+OUTDIR=$3
 
 if ! [ -e "$OUTDIR" ]; then
-  2&> "Cannot write to $1; expecting arg specifying outdir"
+  2&> "Cannot write to $OUTDIR; expecting arg specifying outdir"
   exit 2
 fi
 
 OUTIMG=$OUTDIR/horizon-$MODEL-$STAMP.img
 TMPOUTIMG=$WORK/horizon-$MODEL.img
-
-mkdir "$WORK" > /dev/null 2>&1
 
 cd "$WORK"
 if ! [ -e "$IMAGE" ]; then
@@ -47,54 +58,64 @@ fi
 rm -f $TMPOUTIMG; cp $IMAGE $TMPOUTIMG
 
 loopdev() {
-  losetup -l | grep "$TMPOUTIMG" | awk '{print $1}'
+  # need to use realpath to ensure output from losetup matches the path given, even if it's a symlink
+  losetup -l | grep $(realpath "$TMPOUTIMG") | awk '{print $1}'
 }
 
 looppart() {
   echo "$(echo "$1" | grep -oP '\/dev\/\K\w+')${2}"
 }
 
-usedbytes() {
-  df -B1 $1 | awk 'NR>1{print $3}'
-}
-
 CHROOT_ERR=0
 
 # purposefully leaves around intermediate build files
-cleanup() {
-  USED_ROOT=$(usedbytes "$MOUNT")
-  echo "used root: $USED_ROOT"
-
-  umount "$MOUNT_BOOT"
-  umount "$MOUNT/dev/pts"
-  umount "$MOUNT/dev"
-  umount "$MOUNT/sys" "$MOUNT/proc"
-  umount "$MOUNT"
-  echo "Consistency check partitions"
-  e2fsck -fy /dev/mapper/"$LOOP_ROOT_PARTITION" || :
-
-  # used for both fs and partition padding
-  PAD=$((8*1024*1024))
+finish() {
   sync
 
-  # TODO: figure out what takes up space besides the USED_ROOT such that USED_ROOT+PAD is not sufficient for the new, smaller root size
-  SMALLER_ROOT=$((USED_ROOT+PAD+(256*1024*1024)))
+  USED_ROOT=$(df -B1 "$MOUNT" | awk 'NR>1{print $3}')
+
+  # the padding here is important, it includes the journal size (16MB) and gives the user some root space for initial boot stuff. Also note that the inode count can be exceeded before space itself, getting that right is a matter of the filesystem call below
+  SMALLER_ROOT=$((USED_ROOT+(64*1024*1024)))
+
+  umount "$MOUNT_BOOT"
+  umount "$MOUNT"/dev/pts
+  umount "$MOUNT"/dev
+  umount "$MOUNT"/sys "$MOUNT"/proc
+
+  FINISH_ERR=0
 
   if [ "$CHROOT_ERR" == 0 ]; then
-    rm -f $WORK/root_smaller*
+    tar -cpf $WORK/root_smaller.tar --one-file-system -C $MOUNT .
+  fi
 
-    fsarchiver -j 2 -z 1 savefs $WORK/root_smaller /dev/mapper/"$LOOP_ROOT_PARTITION"
+  # done w/ this mounted vol we can unmount it now
+  umount "$MOUNT"
+
+  if [ "$CHROOT_ERR" == 0 ]; then
+    echo "used root: $USED_ROOT"
 
     parted -s $LOOP_DEV rm 2
-    parted -s $LOOP_DEV mkpart primary $(($(parted -s $LOOP_DEV unit s print | grep -Po '1\s+\d+s\s+\K(\d+)')+1))s ${SMALLER_ROOT}B
-    kpartx -u "$LOOP_DEV"
+    parted -s $LOOP_DEV mkpart primary $(($(parted -s $LOOP_DEV unit s print | grep -Po '1\s+\d+s\s+\K(\d+)')+1))s $(($(parted -s $LOOP_DEV unit b print | grep -Po '1\s+\d+B\s+\K(\d+)')+SMALLER_ROOT))B
+    kpartx -uf $LOOP_DEV
 
     parted -s $LOOP_DEV unit b print
 
-    END_ROOT_B=$(parted -s $LOOP_DEV unit b print | grep -Po '2\s+\d+B\s+\K(\d+)')
+    FINISH_ERR=$?
 
-    fsarchiver restfs "$WORK"/root_smaller.fsa id=0,dest=/dev/mapper/"$LOOP_ROOT_PARTITION"
+    echo "$WORK, $LOOP_ROOT_PARTITION"
+
+    mkfs.ext4 -F -i 12288 -I 512 -b 1024 -O dir_index,sparse_super,extents -L cloudimg-rootfs /dev/mapper/"$LOOP_ROOT_PARTITION"
+    mount -o loop /dev/mapper/"$LOOP_ROOT_PARTITION" "$MOUNT"
+    tar -xpf $WORK/root_smaller.tar -C $MOUNT
+    umount "$MOUNT"
+
+    echo "Consistency check partitions"
+    e2fsck -fy /dev/mapper/"$LOOP_ROOT_PARTITION" || :
+
+    sync
   fi
+
+  END_ROOT_B=$(parted -s $LOOP_DEV unit b print | grep -Po '2\s+\d+B\s+\K(\d+)')
 
   echo "Removing $LOOP_DEV..."
   losetup -d "$LOOP_DEV"
@@ -104,20 +125,28 @@ cleanup() {
   done
 
   if [ "$CHROOT_ERR" == 0 ]; then
-    SIZE=$((END_ROOT_B + PAD))
-    NEW_END=$(($SIZE + (1024 - $SIZE % 1024)))
+
+    SIZE=$((END_ROOT_B + $((8*1024*1024))))
+    NEW_END=$(($SIZE + (1024-$SIZE%1024)))
+    echo "$SIZE, $NEW_END"
     dd if=/dev/null of=$TMPOUTIMG bs=1 count=0 seek=$NEW_END
 
     echo "Finished building image, moving to provided output dir"
     mv $TMPOUTIMG $OUTIMG
   fi
 
-  rm -f $WORK/root_smaller*
-
-  exit $CHROOT_ERR
+  if [ "$CHROOT_ERR" != 0 ]; then
+    2>&1 "Error in chroot: $CHROOT_ERR"
+    exit $CHROOT_ERR
+  elif [ "$FINISH_ERR" != 0 ]; then
+    2>&1 "Error finishing image: $FINISH_ERR"
+    exit $FINISH_ERR
+  else
+    exit 0
+  fi
 }
 
-trap cleanup INT TERM EXIT
+trap finish INT TERM EXIT
 
 LOOP_DEV="$( loopdev )"
 TRIES=0
@@ -144,7 +173,7 @@ if [ "$EX" == "" ]; then
 
   # a trick: copying $LOOP_BOOT_PARTITION content into $LOOP_ROOT_PARTITION/boot so that chrooted kernel upgrades will succeed on ext4 fs. Need to copy those back out to $LOOP_BOOT_PARTITION later and wipe $LOOP_ROOT_PARTITION/boot
   mount -o loop /dev/mapper/"$LOOP_BOOT_PARTITION" "$MOUNT_BOOT"
-  cp -vrLp "$MOUNT_BOOT"/. "$MOUNT"/boot/
+  cp -vrLp $(realpath "$MOUNT_BOOT"/.) "$MOUNT"/boot/
 else
   2>&1 "$MOUNT not mounted, cannot continue"
   exit 1

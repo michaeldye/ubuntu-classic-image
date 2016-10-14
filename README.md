@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This project creates a filesystem image for a Raspberry Pi2 (support for other devices is coming soon). You can download an already-built system image for various SBCs at http://bluehorizon.network.
+This project creates a filesystem image for a Raspberry Pi3 and Pi2 using unofficial Ubuntu PPAs, or Pi2 only using official PPAs. You can download an already-built system image for various SBCs at http://bluehorizon.network.
 
 Related Projects:
 
@@ -15,9 +15,16 @@ Related Projects:
 
 #### Preconditions
 
-* Execution on an armhf device (often we build on Odroid xu4 or C2 SBCs)
-* You must have the module `dm_multipath` loaded and `kpartx`, `parted`, `zip`, `unzip`, `fsarchiver`, and other common GNU tools installed
+* Execution on an armhf device (often we build on Odroid XU4 or Odroid C2 SBCs)
+* You must have the following Linux modules loaded:
+  * `dm_multipath`
+* You must have the following tools available (among common GNU tools):
+  * `kpartx`
+  * `parted`
+  * `zip`
+  * `unzip`
+  * `wget`
 
 #### Steps
 
-* Execute `make sd-image`; the resulting image will be written to /mnt/extra. If you'd like to change the output location, execute `(export IMAGE_OUTPUT_DIR=/tmp/; make -e sd-image)`.
+* Execute `make pi2-sd-image` to make an official, Pi2-only image or `make pi3-sd-image` to make a Pi3 and Pi2 compatible image. The resulting image will be written to /mnt/extra. If you'd like to change the output location, execute `(export IMAGE_OUTPUT_DIR=/tmp/; make -e pi3-sd-image)`.

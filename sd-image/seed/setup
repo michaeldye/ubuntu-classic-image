@@ -120,6 +120,10 @@ dpkg --configure -a
 # autoremove unneeded packages
 apt-get autoremove -y
 
+purge-old-kernels
+
+dpkg-reconfigure -plow unattended-upgrades
+
 # hose workaround for services starting
 rm /usr/sbin/policy-rc.d
 
