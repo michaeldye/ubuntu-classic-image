@@ -120,6 +120,11 @@ dpkg --configure -a
 # autoremove unneeded packages
 apt-get autoremove -y
 
+# remove old kernel b/c that doesn't seem to get removed by later kernel remove cmd
+apt -y purge linux-headers-4.4.0-1009-raspi2 linux-image-4.4.0-1009-raspi2 linux-raspi2-headers-4.4.0-1009
+# not removed automatically, let's hose it
+rm -f /boot/initrd.img.old
+
 purge-old-kernels
 
 dpkg-reconfigure -plow unattended-upgrades

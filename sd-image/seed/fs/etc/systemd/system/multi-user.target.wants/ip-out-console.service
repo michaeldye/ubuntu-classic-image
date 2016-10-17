@@ -1,6 +1,6 @@
 [Unit]
 Description=ip out console
-Requirer=network-online.target getty.target
+Requires=network-online.target getty.target
 After=network-online.target getty.target
 
 [Service]

@@ -173,7 +173,7 @@ if [ "$EX" == "" ]; then
 
   # a trick: copying $LOOP_BOOT_PARTITION content into $LOOP_ROOT_PARTITION/boot so that chrooted kernel upgrades will succeed on ext4 fs. Need to copy those back out to $LOOP_BOOT_PARTITION later and wipe $LOOP_ROOT_PARTITION/boot
   mount -o loop /dev/mapper/"$LOOP_BOOT_PARTITION" "$MOUNT_BOOT"
-  cp -vrLp $(realpath "$MOUNT_BOOT"/.) "$MOUNT"/boot/
+  cp -vrLp "$MOUNT_BOOT"/* "$MOUNT"/boot/
 else
   2>&1 "$MOUNT not mounted, cannot continue"
   exit 1
@@ -206,5 +206,5 @@ echo "$STAMP" > "$MOUNT"/var/horizon/image_version
 
 # copy boot files back to boot partition; hose boot files on root fs
 rm -Rf "$MOUNT_BOOT"/*
-cp -vrLp "$MOUNT"/boot/. "$MOUNT_BOOT"/
+cp -vrLp "$MOUNT"/boot/* "$MOUNT_BOOT"/
 rm -Rf "$MOUNT"/boot/*

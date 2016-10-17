@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This project creates a filesystem image for a Raspberry Pi3 and Pi2 using unofficial Ubuntu PPAs, or Pi2 only using official PPAs. You can download an already-built system image for various SBCs at http://bluehorizon.network.
+This project creates a filesystem image for a Raspberry Pi3 or Pi2 (note that only the Pi2 image only uses official, Ubuntu PPAs). You can download an already-built system image for various SBCs at http://bluehorizon.network.
 
 Related Projects:
 
@@ -27,4 +27,4 @@ Related Projects:
 
 #### Steps
 
-* Execute `make pi2-sd-image` to make an official, Pi2-only image or `make pi3-sd-image` to make a Pi3 and Pi2 compatible image. The resulting image will be written to /mnt/extra. If you'd like to change the output location, execute `(export IMAGE_OUTPUT_DIR=/tmp/; make -e pi3-sd-image)`.
+* Execute `make pi2-sd-image` to make an official, Pi2-only image or `make pi3-sd-image` to make a Pi3 image. The resulting image will be written to /mnt/extra. If you'd like to change the output location, execute `(export IMAGE_OUTPUT_DIR=/tmp/; make -e pi3-sd-image)`.
