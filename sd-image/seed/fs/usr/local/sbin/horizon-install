@@ -1,0 +1,116 @@
+#!/bin/bash
+
+loud() {
+  local msg="++ Horizon firstboot: $1"
+  echo -e "$msg" > /dev/console
+  echo -e "$msg" > /dev/ttyS0
+  echo -e "$msg" > /dev/tty1
+  echo -e "$msg" | logger -t horizon-configure
+}
+
+exists() {
+  snap list 2>/dev/null | grep -q "$1"
+  echo $?
+}
+
+reachable() {
+  host apps.ubuntu.com > /dev/null 2>&1
+  echo $?
+}
+
+if  [ -e /var/horizon/.firstboot ]; then
+  if [ "$(exists bluehorizon)" != 0 ]; then
+    # do install
+    loud 'Installing snaps (this may take a few mins)'
+
+    start=$(date +%s)
+    evalct=0
+    until [ "$(reachable)" == 0 ]; do
+      sleep 10
+
+      if [ $((evalct % 3)) -eq 0 ]; then
+        loud "Ubuntu store unavailable, probably because this device is not connected to a network. Checking back again in a few seconds. This procedure will continue indefinitely; if you'd like to suspend the firstboot setup process, execute 'systemctl stop horizon-configure'. It will be re-executed on reboot."
+      fi
+
+      evalct=$((evalct+1))
+    done
+
+    if [ -e /var/horizon/bluehorizon*.snap ]; then
+      # install from local fs
+
+      snap install --devmode --force-dangerous /var/horizon/bluehorizon*.snap
+    else
+      until [ $(exists bluehorizon) == 0 ]; do
+        mkdir -p /var/log/horizon
+
+        if [ -e /boot/firmware/horizon/snap_channel ]; then
+          channel="$(cat /boot/firmware/horizon/snap_channel)"
+        else
+          channel="beta"
+        fi
+
+        snap install --devmode --"${channel}" bluehorizon 2>/var/log/horizon/firstboot_snap_install-error.log
+
+        start=$(date +%s)
+        if [ $((start - $(date +%s))) -gt 120 ]; then
+          loud 'ERROR: Unable to install bluehorizon snap from the Ubuntu store, please check your network settings.'
+          continue 2
+        fi
+      done
+    fi
+
+    loud 'Successfully installed bluehorizon snap, enabling refresh timer to get future updates'
+
+    systemctl enable snapd.refresh.timer
+    systemctl start snapd.refresh.timer
+	fi
+else
+  # firstboot stuff
+
+  loud 'Starting firstboot configuration'
+  ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
+
+  dpkg --configure -a
+
+  loud 'Growing root partition'
+  /usr/local/sbin/resize-root
+
+  loud 'Generating SSH host keys'
+  dpkg-reconfigure openssh-server
+
+  device_id=$(cat /proc/cpuinfo | grep Serial | head -1 | awk '{print $NF}')
+  if [ "$?" != 0 ] || [ "$device_id" == "" ]; then
+    # can't use this for device id, use mac address of interface instead
+    device_id=$(echo $(sha1sum <(ip -o link show $(basename $(ls -d /proc/sys/net/ipv4/conf/[we]* | head -n1)) | grep -oP "link/ether \K([:\b\w]+) ")) | awk '{print $1}')
+    if [ "$?" != 0 ] || [ "$device_id" == "" ]; then
+      # couldn't use the MAC, using a random string
+      device_id=$(< /dev/urandom tr -dc A-Za-z0-9 | head -c${1:-32};echo)
+    fi
+  fi
+
+  # re-enable unattended upgrades
+  sed -i 's|//"${distro_id}:${distro_codename}-security";|"${distro_id}:${distro_codename}-security";|' /etc/apt/apt.conf.d/50unattended-upgrades
+
+  NEW_HOSTNAME=horizon-$device_id
+  echo -e "\n127.0.1.1        ${NEW_HOSTNAME}" >> /etc/hosts
+  echo "${NEW_HOSTNAME}" > /etc/hostname
+
+  loud "Set hostname to $NEW_HOSTNAME"
+
+  MIN=$((RANDOM % 60))
+  HOUR0=$((RANDOM % 24))
+  for i in {1..3}; do export HOUR${i}="$(( ($HOUR0+($i*6)) %24))"; done
+  echo "$MIN $HOUR0,$HOUR1,$HOUR2,$HOUR3 * * * root /bin/colonus_agent --update-firmware" >> /etc/crontab
+  echo "0    3 * * *   root    find /var/log/workload -iname "*.gz" -mtime +32 -print0 | xargs -0 rm -f" >> /etc/crontab
+  echo "30   3 * * *   root    find /var/log/workload -mtime +2 -size 0 -print0 | xargs -0 rm -f" >> /etc/crontab
+
+  systemctl enable sysstat
+
+  mkdir -p /var/horizon/config
+
+  echo "$device_id" > /var/horizon/config/device_id
+  touch /var/horizon/.firstboot
+
+  loud 'Firstboot setup procedure complete, rebooting'
+  systemctl reboot
+fi

@@ -54,21 +54,13 @@ sed -i 's|"${distro_id}:${distro_codename}-security";|//"${distro_id}:${distro_c
 # need to skip the flash kernel step b/c we build on non-pi devices
 export FLASH_KERNEL_SKIP=1
 
-apt update && apt install -o Dpkg::Options::="--force-confold" -y sysstat htop iftop iotop jq screen bridge-utils rsyslog logrotate crda iw wireless-tools wpasupplicant wireless-regdb curl iptables aufs-tools docker.io plymouth plymouth-label plymouth-themes
+apt update && apt install -o Dpkg::Options::="--force-confold" -y sysstat htop iftop iotop jq screen bridge-utils rsyslog logrotate crda iw wireless-tools wpasupplicant wireless-regdb curl iptables aufs-tools docker.io plymouth plymouth-label plymouth-themes snapd
 
 # do upgrades
 apt upgrade -y
 
 # sometimes this includes more than above
 unattended-upgrade
-
-# get a version that won't bail on pi
-(cd /tmp;
-  curl -o snapd_2.14.2.deb http://launchpadlibrarian.net/282136570/snapd_2.14.2~16.04_armhf.deb &&
-    dpkg --install ./snapd_2.14.2.deb)
-
-# don't let this one upgrade
-apt-mark hold snapd
 
 echo "$TMP_HOSTNAME" > /etc/hostname
 sed "/127.0.1.1/d" -i /etc/hosts
@@ -131,6 +123,9 @@ dpkg-reconfigure -plow unattended-upgrades
 
 # hose workaround for services starting
 rm /usr/sbin/policy-rc.d
+
+# hose dist files for apt
+find /etc/apt/apt.conf.d -type f -iname "*.dist" -exec rm {} \;
 
 # fix that bullshit iface renaming
 ln -s /dev/null /etc/udev/rules.d/80-net-setup-link.rules
