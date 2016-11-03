@@ -1,0 +1,10 @@
+[Unit]
+Description=horizon configure service
+Requires=sysinit.target
+After=local-fs.target
+Before=snapd.service snapd.frameworks.target
+RequiresMountsFor=/boot/firmware
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/horizon-configure
