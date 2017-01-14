@@ -120,7 +120,7 @@ dpkg-reconfigure -plow unattended-upgrades
 rm /usr/sbin/policy-rc.d
 
 # hose dist files for apt
-find /etc/apt/apt.conf.d -type f -iname "*.dist" -exec rm {} \;
+find /etc/apt/apt.conf.d -type f -iname "*-dist" -exec rm {} \;
 
 # fix that bullshit iface renaming
 ln -s /dev/null /etc/udev/rules.d/80-net-setup-link.rules
