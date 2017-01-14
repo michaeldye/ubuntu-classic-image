@@ -71,8 +71,6 @@ wget http://1dd40.http.tor01.cdn.softlayer.net/fauxcon/fauxcon-armhf-0.1.0 -O /u
 
 wget http://1dd40.http.tor01.cdn.softlayer.net/ip-out/ip-out-armv7l-0.1.0 -O /usr/local/bin/ip-out && chmod +x /usr/local/bin/ip-out
 
-wget http://1dd40.http.tor01.cdn.softlayer.net/colonus_agent/colonus_agent-8118d814 -O /bin/colonus_agent && chmod +x /bin/colonus_agent
-
 systemctl disable snapd.refresh.timer
 systemctl disable lxd.service
 systemctl disable pollinate.service
