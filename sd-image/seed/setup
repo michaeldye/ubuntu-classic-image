@@ -51,6 +51,8 @@ sed -i 's|#precedence ::ffff:0:0/96  100|precedence ::ffff:0:0/96  100|' /etc/ga
 # temporarily disable automatic updates to prioritize horizon firstboot setup
 sed -i 's|"${distro_id}:${distro_codename}-security";|//"${distro_id}:${distro_codename}-security";|' /etc/apt/apt.conf.d/50unattended-upgrades
 
+apt-mark hold linux-headers-raspi2 linux-image-raspi2 linux-raspi2 linux-firmware linux-firmware-raspi2
+
 # need to skip the flash kernel step b/c we build on non-pi devices
 export FLASH_KERNEL_SKIP=1
 
@@ -68,8 +70,6 @@ sed "/127.0.1.1/d" -i /etc/hosts
 wget http://1dd40.http.tor01.cdn.softlayer.net/fauxcon/fauxcon-armhf-0.1.0 -O /usr/bin/fauxcon && chmod +x /usr/bin/fauxcon
 
 wget http://1dd40.http.tor01.cdn.softlayer.net/ip-out/ip-out-armv7l-0.1.0 -O /usr/local/bin/ip-out && chmod +x /usr/local/bin/ip-out
-
-wget http://1dd40.http.tor01.cdn.softlayer.net/colonus_agent/colonus_agent-8118d814 -O /bin/colonus_agent && chmod +x /bin/colonus_agent
 
 systemctl disable snapd.refresh.timer
 systemctl disable lxd.service
@@ -113,11 +113,6 @@ dpkg --configure -a
 apt-get autoremove -y
 
 # remove old kernel b/c that doesn't seem to get removed by later kernel remove cmd
-apt -y purge linux-headers-4.4.0-1009-raspi2 linux-image-4.4.0-1009-raspi2 linux-raspi2-headers-4.4.0-1009
-# not removed automatically, let's hose it
-rm -f /boot/initrd.img.old
-
-purge-old-kernels
 
 dpkg-reconfigure -plow unattended-upgrades
 
@@ -125,7 +120,7 @@ dpkg-reconfigure -plow unattended-upgrades
 rm /usr/sbin/policy-rc.d
 
 # hose dist files for apt
-find /etc/apt/apt.conf.d -type f -iname "*.dist" -exec rm {} \;
+find /etc/apt/apt.conf.d -type f -iname "*-dist" -exec rm {} \;
 
 # fix that bullshit iface renaming
 ln -s /dev/null /etc/udev/rules.d/80-net-setup-link.rules

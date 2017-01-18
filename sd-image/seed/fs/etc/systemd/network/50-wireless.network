@@ -1,11 +1,11 @@
 [Match]
 Name=wl*
 
-[Link]
-Name=wlan0
-
 [Network]
-DHCP=v4
+DHCP=ipv4
 
 [DHCP]
 RouteMetric=50
+
+[DHCPv4]
+UseHostname=false
