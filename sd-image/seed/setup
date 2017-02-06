@@ -96,6 +96,8 @@ cat > /etc/docker/daemon.json <<EOF
 }
 EOF
 
+echo -e "fs.file-max = 110000\n" >> /etc/sysctl.conf
+
 sed -i 's,X11Forwarding yes,X11Forwarding no,g' /etc/ssh/sshd_config
 
 apt -y purge cloud-init nano resolvconf open-iscsi
