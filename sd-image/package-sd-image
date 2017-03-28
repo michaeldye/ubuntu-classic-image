@@ -9,12 +9,12 @@ MODEL=$1
 
 case $MODEL in
   pi2)
-    IMAGE="ubuntu-16.04-preinstalled-server-armhf+raspi2.img"
-    URL="http://cdimage.ubuntu.com/ubuntu/releases/16.04/release/$IMAGE.xz"
+    IMAGE="ubuntu-16.04.2-raspi2-hzn-032817.img"
+    URL="http://1dd40.http.tor01.cdn.softlayer.net/ubuntu-classic-image-base/$IMAGE.xz"
     ;;
   pi3)
-    IMAGE="ubuntu-16.04-preinstalled-server-armhf+raspi3.img"
-    URL="http://www.finnie.org/software/raspberrypi/ubuntu-rpi3/$IMAGE.xz"
+    IMAGE="ubuntu-16.04.2-raspi3-hzn-032817.img"
+    URL="http://1dd40.http.tor01.cdn.softlayer.net/ubuntu-classic-image-base/$IMAGE.xz"
     ;;
 esac
 
